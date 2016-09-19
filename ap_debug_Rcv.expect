@@ -1,0 +1,153 @@
+#!/usr/bin/expect -f
+# Version: 1.0
+
+# 
+# THIS SAMPLE APPLICATION AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY
+# OF ANY KIND BY CISCO, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED
+# TO THE IMPLIED WARRANTIES OF MERCHANTABILITY FITNESS FOR A PARTICULAR
+# PURPOSE, NONINFRINGEMENT, SATISFACTORY QUALITY OR ARISING FROM A COURSE OF
+# DEALING, LAW, USAGE, OR TRADE PRACTICE. CISCO TAKES NO RESPONSIBILITY
+# REGARDING ITS USAGE IN AN APPLICATION, AND IT IS PRESENTED ONLY AS AN
+# EXAMPLE. THE SAMPLE CODE HAS NOT BEEN THOROUGHLY TESTED AND IS PROVIDED AS AN
+# EXAMPLE ONLY, THEREFORE CISCO DOES NOT GUARANTEE OR MAKE ANY REPRESENTATIONS
+# REGARDING ITS RELIABILITY, SERVICEABILITY, OR FUNCTION. IN NO EVENT DOES
+# CISCO WARRANT THAT THE SOFTWARE IS ERROR FREE OR THAT CUSTOMER WILL BE ABLE
+# TO OPERATE THE SOFTWARE WITHOUT PROBLEMS OR INTERRUPTIONS. NOR DOES CISCO
+# WARRANT THAT THE SOFTWARE OR ANY EQUIPMENT ON WHICH THE SOFTWARE IS USED WILL
+# BE FREE OF VULNERABILITY TO INTRUSION OR ATTACK. THIS SAMPLE APPLICATION IS
+# NOT SUPPORTED BY CISCO IN ANY MANNER. CISCO DOES NOT ASSUME ANY LIABILITY
+# ARISING FROM THE USE OF THE APPLICATION. FURTHERMORE, IN NO EVENT SHALL CISCO
+# OR ITS SUPPLIERS BE LIABLE FOR ANY INCIDENTAL OR CONSEQUENTIAL DAMAGES, LOST
+# PROFITS, OR LOST DATA, OR ANY OTHER INDIRECT DAMAGES EVEN IF CISCO OR ITS
+# SUPPLIERS HAVE BEEN INFORMED OF THE POSSIBILITY THEREOF.
+# 
+
+proc Usage {} {
+    global argv0;
+    puts "Usage: $argv0 \[AP IP to monitor\]";
+    exit;
+}
+
+# User Variables:
+set username ##AP_Username##
+set password ##AP_Password##
+
+# Variables
+set timeout 20
+match_max 100000
+log_user 0
+set basemac Unknown
+
+
+# Input checking
+if {$::argc == 1} {
+    set AParg [lindex $argv 0]
+} else {
+    Usage;
+}
+
+proc ErrorOut { message } {
+    puts "[clock format [clock scan now] -format "%Y-%m-%d_%H%M%S"] $message\n";
+    exit;
+}
+proc ErrorIn { message } {
+    puts "[clock format [clock scan now] -format "%Y-%m-%d_%H%M%S"] $message\n";
+}
+
+proc connect {ip user pass} {
+    global expect_out;
+    spawn ssh $user@$ip;
+    set id $spawn_id;
+    expect {
+        -re "Username:" {
+            send -i $id "$user\n";
+#            puts $expect_out(buffer);
+            exp_continue;
+        }
+        -re "Password:" {
+            send -i $id "$pass\n";
+#            puts $expect_out(buffer);
+            exp_continue;
+        }
+        -re ">" {
+            send -i $id "enable\n";
+#            puts $expect_out(buffer);
+            exp_continue;
+        }
+        -re "#" {
+#            puts $expect_out(buffer);
+            return $id;
+        }
+        timeout {
+#            puts $expect_out(buffer);
+            ErrorOut "Expect timeout while connecting to $ip";
+            return 0;
+        }
+        eof {
+#            puts $expect_out(buffer);
+            ErrorOut "Unexpected eof while connecting to $ip";
+            return 0;
+        }
+    }
+    ErrorOut "We shouldn't be here";
+    return 0;
+}
+
+set ip $AParg;
+
+set id [connect $ip $username $password];
+
+if {$id == 0} {
+    ErrorOut "Failed to Connect, Exiting.\n";
+    exit;
+}
+set spawn_id $id
+send "debug capwap con cli\n";
+send "conf term\n";
+send "line vty 0 15\n"
+send "exec-timeout 0\n"
+send "end\n"
+send "un all\n";
+send "deb dot11 dot11Radio 1 trace print rcv\n"
+send "term mon\n"
+
+# Loop waiting for input
+set bored 0;
+set timeout 20
+while {1} {
+    expect {
+        "\n" {
+            set bored 0;
+            foreach line [split $expect_out(buffer) "{\n}"] {
+                set line [regsub -all {\r} $line {}]
+		#Ignore blanks
+		if [string equal $line ""] {
+                    continue;
+                }
+                if [regexp {^\*(\w+\s+\d+\s+\d+:\d+:\d+\.\d+):\s+\w+\s+[^\s]+\s+([^\s]+)\s+(\d+)\/(\d+)\/(\d+)\/(\d+)\s+(\d+)-\s+\w+\s+\w+\s(\w{6})\s(\w{6})} $line _ mac other rssi1 rssi2 rssi3 rssi4 snr sender mac ] {
+# SAMPLE Line: ^*Jul  8 18:09:08.303: 5F5B791D rp  m1-2   63/64/61/63 34- 
+                set rssiavg [expr ( $rssi1 + $rssi2 + $rssi3 + $rssi4 ) / 4];
+#                puts "\n->>$snr<<-\n";
+#                puts "{ timestamp:\"$date\",mac:\"$mac\",rssi:\"$rssiavg\",snr:\"$snr\"}";
+                puts "$mac -$rssiavg $snr";
+                }
+            }
+        }
+        eof {
+            puts "Connection closed by remote device: $AParg\n";
+            exit;
+        }
+        timeout {
+            incr bored;
+            if {$bored > 90} { puts "No data received for a while, exiting"; exit; }
+#            send "\n";
+#            puts "BORED: $bored";
+        }
+    }
+#    puts "LOOP"
+}
+ErrorOut "We definitely shouldn't be here";
+exit;
+
+
+
