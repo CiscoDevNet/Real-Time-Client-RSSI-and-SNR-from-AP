@@ -1,6 +1,6 @@
 # Real-time RSSI & SNR Graph from AP perspective
 First presented at Cisco Live! Las Vegas 2016 [BRKEWN-3000]
-(https://www.ciscolive.com/online/connect/sessionDetail.ww?SESSION_ID=90808&backBtn=true)
+(https://ciscolive.cisco.com/on-demand-library/?search=BRKEWN-3000#/session/145500484115000100IZ)
 
 # Brief
 This project uses debug command output from the AP command line to generate a near real-time graph of the client's RSSI & SNR from the AP's perspective. 
